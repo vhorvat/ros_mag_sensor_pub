@@ -3,62 +3,52 @@
 import rospy
 from std_msgs.msg import String
 import serial
-import re
+import threading
 
-def readSerial(device_path):
-    ser = serial.Serial(device_path, 115200, timeout=1)
+def readSerial(devicePath):
+    ser = serial.Serial(devicePath, 115200, timeout=1)
     ser.flush()
     
     while True:
         if ser.in_waiting > 0:
             try:
-                line = ser.readline().decode('utf-8', errors='ignore').strip()
+                line = ser.readline().decode('utf-8', errors='ignore')
+                rospy.loginfo(f"{line}")
                 if line:
                     return line
             except Exception as e:
-                rospy.logwarn(f"Failed to read from serial port: {e}")
+                rospy.logwarn(f"Failed to read from serial: {e}")
 
-def parseSerialData(line):
-    pattern = r"x:\(([-\d\.]+) µT\), y:\(([-\d\.]+) µT\), z:\(([-\d\.]+) µT\), t:\(([-\d\.]+)°C\)" 
-    match = re.match(pattern, line)
-    
-    if match:
-        x = float(match.group(1))
-        y = float(match.group(2))
-        z = float(match.group(3))
-        t = float(match.group(4))
-        return x, y, z, t
-    else:
-        return None
-
-def sensorPublisher():
-    rospy.init_node('sensor_publisher_node', anonymous=True)
-
-    devicePath = rospy.get_param('~device_path', '/dev/ttyACM0')
-    rospy.loginfo("Reading data from device: %s", devicePath)
-
-    pub = rospy.Publisher('sensor_data', String, queue_size=10)
-    rate = rospy.Rate(100)  
+def sensorPublisher(sensorName, devicePath):
+    pub = rospy.Publisher(f'sensor_data/{sensorName}', String, queue_size=10)
+    rate = rospy.Rate(100)
 
     while not rospy.is_shutdown():
         serialData = readSerial(devicePath)
 
         if serialData:
-            sensorVal = parseSerialData(serialData)
-            
-            if sensorVal:
-                x, y, z, t = sensorVal
-                
-                sensorDataMsg = "x:{:.2f},y:{:.2f},z:{:.2f},t:{:.2f}".format(x, y, z, t)
-                
-                rospy.loginfo(sensorDataMsg)
-                pub.publish(sensorDataMsg)
-        
+            pub.publish(serialData)
+
         rate.sleep()
+
+def start_sensor_thread(sensorName, devicePath):
+    thread = threading.Thread(target=sensorPublisher, args=(sensorName, devicePath))
+    thread.start()
 
 if __name__ == '__main__':
     try:
-        sensorPublisher()
+
+        rospy.init_node('multi_sensor_publisher_node', anonymous=True)
+        sensors = [
+            {"name": "senzor1", "device_path": "/dev/senzor1"},
+            {"name": "senzor2", "device_path": "/dev/senzor2"}
+        ]
+
+        for sensor in sensors:
+            start_sensor_thread(sensor["name"], sensor["device_path"])
+
+        rospy.spin()
+
     except rospy.ROSInterruptException:
         pass
 
